@@ -1,0 +1,4 @@
+[2019-10-31 09:56:03] [MSG] [0x49b9c740] [test_log.cpp:7 int main()]: ret = 10
+[2019-10-31 09:56:03] [INFO] [0x49b9c740] [test_log.cpp:8 int main()]: hello world
+[2019-10-31 10:16:59] [MSG] [24881] [test_log.cpp:7 int main()]: ret = 10
+[2019-10-31 10:16:59] [INFO] [24881] [test_log.cpp:8 int main()]: hello world
