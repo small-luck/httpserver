@@ -97,7 +97,8 @@ private:
 
     //日志线程是否退出
     bool                            m_exit{false};
-
+    
+    //日志队列
     std::list<std::string>          m_log_list;
 
 };

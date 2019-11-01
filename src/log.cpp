@@ -4,8 +4,8 @@
  *date: 2019/10/30
  * */
 
-#include "../inc/log.h"
-#include "../inc/utils.h"
+#include "log.h"
+#include "utils.h"
 #include <iostream>
 #include <string>
 #include <time.h>
