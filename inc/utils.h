@@ -29,9 +29,9 @@ int set_no_use_nagle(int fd);
 int set_fd_send_recv_timeout(int fd);
 
 //ET模式下发送数据
-bool send_data(int fd, std::string& str);
+bool send_data(Connection* conn);
 
 //ET模式下接收数据
-bool recv_data(int fd, std::string& str);
+bool recv_data(Connection* conn);
 
 #endif //__UTILS_H__

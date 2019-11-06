@@ -83,9 +83,11 @@ int set_fd_send_recv_timeout(int fd)
 }
 
 //ET模式下发送数据
-bool send_data(int fd, std::string& str)
+bool send_data(Connection* conn)
 {
     int nsend = 0;
+    int fd = conn->m_sockfd;
+    std::string& str = conn->m_send_buffer;
 
     if (fd < 0 || str.empty())  
         return false;
@@ -120,11 +122,12 @@ bool send_data(int fd, std::string& str)
 }
 
 //ET模式下接收数据
-bool recv_data(int fd, std::string& str)
+bool recv_data(Connection* conn)
 {
     int nrecv;
     char msg[4096];
-
+    int fd = conn->m_sockfd;
+    std::string str;
     if (fd < 0)
         return false;
 
@@ -132,8 +135,9 @@ bool recv_data(int fd, std::string& str)
         memset(&msg, 0, sizeof(msg));
         nrecv = ::recv(fd, msg, 4096, 0);
         if (nrecv < 0) {
-            if (errno == EWOULDBLOCK || errno == EINTR)
-                return true;
+            if (errno == EWOULDBLOCK || errno == EINTR) {
+                break;
+            }
             return false;
         } else if (nrecv == 0) {
             //对端关闭
@@ -142,6 +146,9 @@ bool recv_data(int fd, std::string& str)
             str.append(msg);
         }
     }
+    
+    conn->m_recv_buffer = str;
+    return true;
 }
 
 
