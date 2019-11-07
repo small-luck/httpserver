@@ -25,6 +25,8 @@
 #define TCP_SEND_TIMEO      (10)
 #define TCP_RECV_TIMEO      (10)
 
+#define MAX_HEADER_SIZE     (4096)
+
 //connection的状态
 enum {
     CONN_STATE_INIT = 0,            //初始化
@@ -35,9 +37,25 @@ enum {
     CONN_STATE_BAD                  //connecttion error
 };
 
+//支持的HTTP Method
+enum {
+    PUT = 0,
+    GET,
+    DELETE
+};
+
+static std::map<std::string, int> g_methods = {
+    {"PUT", PUT},
+    {"GET", GET},
+    {"DELETE", DELETE}
+};
+
 class Request {
 public:
-    int m_content_length;
+    std::string                 m_http_method;
+    std::string                 m_http_version;
+    std::vector<std::string>    m_para;
+    uint64_t                    m_bodysize = 0;
 };
 
 class Response {
@@ -112,7 +130,7 @@ friend class Connection;
     void recv_notify(Connection* conn);
     
     //创建sockpair，来设置conn
-    int  set_sockpair_conn(Connection* conn, int* fd);
+    int  set_sockpair_conn(Connection** conn, int* fd);
 
     //将conn重新放入epoll中
     int reset_conn_in_epoll(Connection* conn);

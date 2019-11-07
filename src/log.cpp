@@ -78,7 +78,7 @@ void Logger::add_to_list(int type, const char* level, const char* filename, int 
                 tmstr->tm_min,
                 tmstr->tm_sec,
                 level,
-                get_thread_id(),
+                Util::get_thread_id(),
                 filename,
                 line,
                 funcname,

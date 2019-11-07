@@ -15,13 +15,13 @@
 #include <netinet/tcp.h>
 
 //获取线程ID
-pid_t get_thread_id()
+pid_t Util::get_thread_id()
 {
     return ::syscall(SYS_gettid);
 }
 
 //设置fd non-block 
-int set_fd_nonblock(int fd)
+int Util::set_fd_nonblock(int fd)
 {
     if (fd < 0) 
         return -NET_ARGUMENT_ERROR;
@@ -32,7 +32,7 @@ int set_fd_nonblock(int fd)
 }
 
 //设置socket reuseaddr
-int set_reuseaddr(int fd)
+int Util::set_reuseaddr(int fd)
 {
     int on = 1;
 
@@ -43,7 +43,7 @@ int set_reuseaddr(int fd)
 }
 
 //设置socket reuseport
-int set_reuseport(int fd)
+int Util::set_reuseport(int fd)
 {
     int on = 1;
 
@@ -54,7 +54,7 @@ int set_reuseport(int fd)
 }
 
 //设置socket nodelay, forbidden nagel
-int set_no_use_nagle(int fd)
+int Util::set_no_use_nagle(int fd)
 {
     int on = 1;
 
@@ -65,7 +65,7 @@ int set_no_use_nagle(int fd)
 }
 
 //设置socket fd send and recv timeout
-int set_fd_send_recv_timeout(int fd)
+int Util::set_fd_send_recv_timeout(int fd)
 {
     struct timeval tv;
     int ret;
@@ -83,17 +83,15 @@ int set_fd_send_recv_timeout(int fd)
 }
 
 //ET模式下发送数据
-bool send_data(Connection* conn)
+bool Util::send_data(int fd, std::string& sendstr)
 {
     int nsend = 0;
-    int fd = conn->m_sockfd;
-    std::string& str = conn->m_send_buffer;
 
-    if (fd < 0 || str.empty())  
+    if (fd < 0 ||sendstr.empty())  
         return false;
 
     while (true) {
-        nsend = ::send(fd, str.c_str(), str.length(), 0);
+        nsend = ::send(fd, sendstr.c_str(), sendstr.length(), 0);
         if (nsend < 0) {
             //如果是因为tcp发送窗口过小，无法发出去，休眠一段时间后再尝试发送
             if (errno == EWOULDBLOCK) {
@@ -112,9 +110,9 @@ bool send_data(Connection* conn)
             return false;
         }
         
-        str.erase(nsend);
+        sendstr.erase(nsend);
 
-        if (str.length() == 0)
+        if (sendstr.length() == 0)
             break;
     }
 
@@ -122,12 +120,10 @@ bool send_data(Connection* conn)
 }
 
 //ET模式下接收数据
-bool recv_data(Connection* conn)
+bool Util::recv_data(int fd, std::string& recvstr)
 {
     int nrecv;
     char msg[4096];
-    int fd = conn->m_sockfd;
-    std::string str;
     if (fd < 0)
         return false;
 
@@ -143,13 +139,51 @@ bool recv_data(Connection* conn)
             //对端关闭
             return false;
         } else {
-            str.append(msg);
+            recvstr.append(msg);
         }
     }
     
-    conn->m_recv_buffer = str;
     return true;
 }
 
+//根据分隔符将str分成若干个，放入vector
+void Util::split(const std::string& str, std::vector<std::string>& v, const char* separator/* = ";"*/)
+{
+    if (str.empty() || separator == nullptr)
+        return;
 
+    std::string buf(str);
+    std::size_t pos = std::string::npos;
+    int separator_len = strlen(separator);
+    std::string substr_str;
 
+    while (true) {
+        pos = buf.find(separator);
+        if (pos != std::string::npos) {
+            substr_str = buf.substr(0, pos);
+            if (!substr_str.empty())
+                v.push_back(substr_str);
+            buf = buf.substr(pos + separator_len);
+        } else {
+            if (!buf.empty())
+                v.push_back(buf);
+            break;
+        }
+    }
+}
+
+//根据分隔符将str分成两半，放入map中
+void Util::cut(const std::string& str, std::pair<std::string, std::string>& m, const char* separator/* = ":"*/)
+{
+    if (str.empty() || separator == nullptr)
+        return;
+
+    int separator_len = strlen(separator);
+    std::size_t pos;
+
+    pos = str.find(separator);
+    if (pos != std::string::npos) {
+        m.first = str.substr(0, pos);
+        m.second = str.substr(pos + separator_len);
+    }
+}

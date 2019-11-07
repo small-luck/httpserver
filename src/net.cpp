@@ -35,37 +35,73 @@ void Connection::free_conn(Connection* conn)
 bool Connection::check_has_complete_header()
 {
     bool ret = false;
-    int i;
     if (m_recv_buffer.empty() || m_recv_buffer.size() < 4)
         return false;
-
-    //判断str中是否有连续的\r\n\r\n
-    for (i = 0; i < (int)m_recv_buffer.size(); i++) {
-        std::cout << m_recv_buffer[i] << std::endl;
-        if (i < (int)m_recv_buffer.size()-4 && m_recv_buffer[i] == '\r') {
-            if (m_recv_buffer[i+1] == '\n' && m_recv_buffer[i+2] == '\r' && m_recv_buffer[i+3] == '\n') {
-                ret = true;
-                m_header_end = i;
-                break;
-            }
-        }
-    }
     
+    std::size_t pos = m_recv_buffer.find("\r\n\r\n");
+    if(pos != std::string::npos) {
+        ret = true;
+        m_header_end = pos;
+    }
+  
     return ret;
 }
 
 //解析http header，判断header是否合法
 bool Connection::parse_http_header()
 {
-    std::string header_str = m_recv_buffer.substr(m_header_end);
+    std::string header_str = m_recv_buffer.substr(0, m_header_end);
 
     LOG_MSG("header_str = %s\n", header_str.c_str());
+
+    //根据\r\n分割为每一行
+    std::vector<std::string> header_line;
+    Util::split(header_str, header_line, "\r\n");
+
+    /* LOG_MSG("header_line size = %d\n", header_line.size()); */
+    /* for (int i = 0; i < (int)header_line.size(); i++) */ 
+    /*     LOG_MSG("line[%d] = %s\n", i, header_line[i].c_str()); */
+    
+    //判断第一行是否符合规范
+    std::vector<std::string> first_line_para;
+    Util::split(header_line[0].c_str(), first_line_para, " ");
+    /* LOG_MSG("first_paras size = %d\n", first_line_para.size()); */
+    /* for (int i = 0; i < (int)first_line_para.size(); i++) */ 
+    /*     LOG_MSG("para[%d] = %s\n", i, first_line_para[i].c_str()); */
+    if (first_line_para.size() < 3) {
+        LOG_ERROR("header first line:%s is invalid", header_line[0].c_str());
+        return false;
+    }
+
+    std::string method = first_line_para[0];
+    auto it = g_methods.find(method);
+    if (it == g_methods.end()) {
+        LOG_ERROR("method:%s is invalid\n", method.c_str());
+        return false;
+    }
+    
+    //获取必须的header 字段信息
+    std::string url = first_line_para[1];
+    std::string version = first_line_para[2];
+
+    std::vector<std::pair<std::string, std::string>> header_set;
+    //删除第一行元素
+    header_line.erase(header_line.begin()); 
+    for (auto& v : header_line) {
+        std::pair<std::string, std::string> p;
+        Util::cut(v, p, ": ");
+        header_set.push_back(p);
+    }
+
+    //根据header的key获取value
+    for (auto& v : header_set)
+        LOG_MSG("key = %s, value = %s\n", v.first.c_str(), v.second.c_str());
 
     return true;
 }
 
 //创建sockpair，来设置conn
-int  Httpserver::set_sockpair_conn(Connection* conn, int* fd)
+int  Httpserver::set_sockpair_conn(Connection** conn, int* fd)
 {
     int sock_pair[2];
     int ret;
@@ -73,8 +109,8 @@ int  Httpserver::set_sockpair_conn(Connection* conn, int* fd)
         LOG_ERROR("socketpair failed, errno:%d\n", errno);
         return -NET_INTERVAL_ERROR;
     }
-    conn = new Connection(sock_pair[1]);
-    ret = add_to_epoll(m_epollfd, conn, 0);
+    *conn = new Connection(sock_pair[1]);
+    ret = add_to_epoll(m_epollfd, *conn, 0);
     if (ret < 0) {
         LOG_ERROR("epoll_ctl error, ret:%d, epollfd:%d, fd:%d, errno:%d\n", ret, m_epollfd, sock_pair[1], errno);
         ret = -NET_INTERVAL_ERROR;
@@ -299,7 +335,7 @@ void Httpserver::recv_request()
 
         }
 
-        ret = recv_data(conn);
+        ret = Util::recv_data(conn->m_sockfd, conn->m_recv_buffer);
         if (!ret) {
             //连接有问题或对端关闭
             LOG_INFO("fd:%d is close\n", conn->m_sockfd);
@@ -308,6 +344,7 @@ void Httpserver::recv_request()
         }
 
         LOG_MSG("recv data = %s\n", conn->m_recv_buffer.c_str());
+        LOG_MSG("recv data size = %d\n", conn->m_recv_buffer.size());
 
         //接收成功后，将conn放入m_rewuests_queue
         m_requests_lock.lock();
@@ -345,10 +382,18 @@ void Httpserver::process()
         LOG_MSG("conn->recv = %s\n", conn->m_recv_buffer.c_str());
         //解析，是否已经接收了一个完整的HTTP 头部
         if (!conn->check_has_complete_header()) {
+            //如果接收的头部大于4096个字节并且还没有结束，认为是不合法的请求，关闭
+            if (conn->m_recv_buffer.size() > MAX_HEADER_SIZE) {
+                LOG_ERROR("conn:%p header is too large, not invalid, need close\n", conn);
+                Connection::free_conn(conn);
+                continue;
+            }
             //如果没有，把conn重新放入epoll，继续接收
             LOG_MSG("conn:%p don't have a complete header, need recv\n", conn);
             goto ADD_EPOLL;
         }
+        
+        LOG_MSG("conn:%p get a complete header\n", conn);
 
         //解析header，判断是否合法
         if (!conn->parse_http_header()) {
@@ -356,16 +401,15 @@ void Httpserver::process()
             Connection::free_conn(conn);
             continue;
         }
-        
+         
         Connection::free_conn(conn);
         continue;
 
 ADD_EPOLL:
-        ret = reset_conn_in_epoll(conn);
-        if (ret < 0) {
-            LOG_ERROR("reset_conn_in_epoll failed, ret:%d, conn:%p, errno:%d\n", ret, conn, errno);
-            Connection::free_conn(conn);
-        }    
+        m_modify_lock.lock();
+        m_modify_queue.push_back(conn);
+        m_modify_lock.unlock();
+        send_notify(m_modify_fd);   
     }
 
 EXIT:
@@ -389,7 +433,7 @@ int Httpserver::do_accept()
     }
     
     //将newfd设置为非阻塞
-    ret = set_fd_nonblock(newfd);
+    ret = Util::set_fd_nonblock(newfd);
     if (ret < 0) {
         LOG_ERROR("set_fd_nonblock error, ret:%d, fd:%d, errno:%d\n", ret, newfd, errno);
         close(newfd);
@@ -397,7 +441,7 @@ int Httpserver::do_accept()
     }
 
     //set nodelay, forbidden nagle 
-    ret = set_no_use_nagle(newfd);
+    ret = Util::set_no_use_nagle(newfd);
     if (ret < 0) {
         LOG_ERROR("set_no_use_nagle error, ret:%d, fd:%d, errno:%d\n", ret, newfd, errno);
         close(newfd);
@@ -405,7 +449,7 @@ int Httpserver::do_accept()
     }
 
     //set send and recv timeout
-    ret = set_fd_send_recv_timeout(newfd);
+    ret = Util::set_fd_send_recv_timeout(newfd);
     if (ret < 0) {
         LOG_ERROR("set_fd_send_recv_timeout error, ret:%d, fd:%d, errno:%d\n", ret, newfd, errno);
     }
@@ -442,20 +486,20 @@ void Httpserver::main_loop(const char* ip, short port)
         return;
     }
     
-    ret = set_fd_nonblock(listenfd);
+    ret = Util::set_fd_nonblock(listenfd);
     if (ret < 0) {
         LOG_ERROR("set_fd_nonblock error, ret:%d, fd:%d, errno:%d\n", ret, listenfd, errno);
         return;
     }
 
     //set listenfd reuseaddr reuseport
-    ret = set_reuseaddr(listenfd);
+    ret = Util::set_reuseaddr(listenfd);
     if (ret < 0) {
         LOG_ERROR("set_reuseaddr error, ret:%d, fd:%d, errno:%d", ret, listenfd, errno);
         return;
     }
 
-    ret = set_reuseport(listenfd);
+    ret = Util::set_reuseport(listenfd);
     if (ret < 0) {
         LOG_ERROR("set_reuseport error, ret:%d, fd:%d, errno:%d", ret, listenfd, errno);
         return;
@@ -497,14 +541,14 @@ void Httpserver::main_loop(const char* ip, short port)
     }
 
     //创建wakeup_conn的sockpair,并加入epoll
-    ret = set_sockpair_conn(m_notify_wakeup_conn, &m_wakeup_fd);
+    ret = set_sockpair_conn(&m_notify_wakeup_conn, &m_wakeup_fd);
     if (ret < 0) {
         LOG_ERROR("set_sockpair_conn failed, ret:%d, errno:%d\n", ret, errno);
         return;
     }
 
     //创建modify_conn的sockpair,并加入epoll
-    ret = set_sockpair_conn(m_notify_modify_conn, &m_modify_fd);
+    ret = set_sockpair_conn(&m_notify_modify_conn, &m_modify_fd);
     if (ret < 0) {
         LOG_ERROR("set_sockpair_conn failed, ret:%d, errno:%d\n", ret, errno);
         return;
@@ -528,7 +572,7 @@ void Httpserver::main_loop(const char* ip, short port)
 
         //当有IO事件触发
         for (i = 0; i < nevents; i++) {
-            if (static_cast<Connection*>(m_epoll_events[i].data.ptr) == m_notify_wakeup_conn) {
+            if (m_epoll_events[i].data.ptr == static_cast<void*>(m_notify_wakeup_conn)) {
                 LOG_MSG("get a wakeup conn event, fd:%d\n", m_notify_wakeup_conn->m_sockfd);
                 recv_notify(m_notify_wakeup_conn);    
                 if (m_exit)
@@ -549,7 +593,6 @@ void Httpserver::main_loop(const char* ip, short port)
                 Connection* modify_conn = m_modify_queue.front();
                 m_modify_queue.pop_front();
                 m_modify_lock.unlock();
-
                 ret = reset_conn_in_epoll(modify_conn);
                 if (ret < 0) {
                     LOG_ERROR("reset_conn_in_epoll: failed, ret:%d, conn:%p, errno:%d\n", ret, modify_conn, errno);
