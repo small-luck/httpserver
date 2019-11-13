@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <memory>
 #include <stdarg.h>
+#include "singleton.h"
 
 class Logger;
 
@@ -26,8 +27,8 @@ class Logger;
 #define DEBUG       //for test
 
 #define LOG_DEBUG(type, mask, level, file, line, funcname, args...) \
-    if (Logger::get_instance().get_mask() & mask) { \
-        Logger::get_instance().add_to_list(type, level, file, line, funcname, ##args); \
+    if (Logger::get_instance()->get_mask() & mask) { \
+        Logger::get_instance()->add_to_list(type, level, file, line, funcname, ##args); \
     }
 
 #ifndef DEBUG
@@ -44,13 +45,10 @@ class Logger;
 
 #define LOG_DEFAULT_FILEPATH    "http_server.log"
 
-#define ONE_LOG_MAXSIZE (1024)
+#define ONE_LOG_MAXSIZE (4096)
 
-class Logger {
+class Logger : public Singletonptr<Logger> {
 public:
-    //获取Logger实例
-    static Logger& get_instance();
-
     //启动日志模块
     bool start(const char* filepath, int mask);
 
@@ -66,13 +64,6 @@ public:
     }
 
 private:
-    //单例模式
-    Logger() = default;
-
-    //nocopyable
-    Logger(const Logger& logger) = delete;
-    Logger& operator= (const Logger& logger) = delete;
-
     //日志工作线程，用于打印或者写入日志
     void do_log();
 
@@ -102,8 +93,5 @@ private:
     std::list<std::string>          m_log_list;
 
 };
-
-void log_init(const char* filename, int mask);
-void log_uninit();
 
 #endif //__LOG_H__

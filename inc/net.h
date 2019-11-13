@@ -15,6 +15,7 @@
 #include <thread>
 #include <vector>
 #include <sys/epoll.h>
+#include "callback.h"
 
 #define SEND_THREAD_NUM     (1)
 #define RECV_THREAD_NUM     (1)
@@ -52,18 +53,45 @@ static std::map<std::string, int> g_methods = {
 
 class Request {
 public:
+    Request() {}
+       
+    void init(std::string& method, std::string& version, std::string& url, uint64_t len) {
+        m_http_method = method;
+        m_http_version = version;
+        m_url = url;
+        m_content_length = len;
+    }
+
+    std::string& get_method() {
+        return m_http_method;
+    }
+
+    uint64_t get_content_length() {
+        return m_content_length;
+    }
+
+private:
     std::string                 m_http_method;
     std::string                 m_http_version;
-    std::vector<std::string>    m_para;
-    uint64_t                    m_bodysize = 0;
+    std::string                 m_url;
+    uint64_t                    m_content_length = 0;
 };
 
 class Response {
+public:
+
+private:
+
 };
 
+class Httpserver;
 class Connection {
 public:
-    Connection(int fd) : m_sockfd(fd) {
+    Connection(int fd, std::shared_ptr<Httpserver> ptr) {
+        m_sockfd = fd;
+        m_httpserver = std::shared_ptr<Httpserver>(ptr);
+        m_request = std::make_shared<Request>();
+        m_response = std::make_shared<Response>();
     }
     
     //释放一个connection
@@ -71,11 +99,62 @@ public:
 
      //检查是否已经接收了一个完整的包
     bool check_has_complete_header();
-
+    
     //解析http header
     bool parse_http_header();
 
 public:
+    //获取fd
+    int get_fd() {
+        return m_sockfd;
+    }
+
+    //设置fd
+    void set_fd(int fd) {
+        m_sockfd = fd;
+    }
+
+    //获取conn状态
+    int get_state() {
+        return m_state;
+    }
+
+    //设置conn状态
+    void set_state(int state) {
+        m_state = state;
+    }
+
+    //获取recvbuff
+    std::string& get_recv() {
+        return m_recv_buffer;
+    }
+
+    //设置recvbuff
+    void append_to_recv(std::string& str) {
+        m_recv_buffer.append(str);
+    }
+
+    //获取request ptr
+    std::shared_ptr<Request>& get_request() {
+        return m_request;
+    }
+
+    //获取request header的末尾index
+    int get_header_end() {
+        return m_header_end;
+    } 
+
+    //设置content未接收的大小
+    void set_content_left_len(uint64_t len) {
+        m_left_content_len = len;
+    }
+
+    //获取content未接收的大小
+    uint64_t get_content_left_len() {
+        return m_left_content_len;
+    }
+
+private:
     //socket fd
     int                         m_sockfd = 0;
 
@@ -91,28 +170,39 @@ public:
 
     //request header的末尾index
     int                         m_header_end = 0;
+    
+    //如果有body, 表示剩下还有多少字节的Body待接收
+    uint64_t                    m_left_content_len = 0;
+
+    //httpserver
+    std::shared_ptr<Httpserver> m_httpserver;
 };
 
-class Httpserver {
+class Httpserver : public std::enable_shared_from_this<Httpserver> {
 public:
 friend class Connection;
     //初始化
-    void init();
+    void init(const char* ip, short port, const ProcessCallback& cb);
 
     //回收资源
     void uninit();
 
-    //发送函数
+    //获取自身shared_ptr
+    std::shared_ptr<Httpserver> get_ptr() {
+        return shared_from_this();
+    }
+
+    //发送线程函数
     void send_reponse();
 
-    //接收函数
+    //接收线程函数
     void recv_request();
 
-    //业务函数
-    void process();
+    //业务协议线程函数
+    void do_protocol();
 
     //主线程循环函数
-    void main_loop(const char* ip, short port);
+    void main_loop();
 
     //将fd从epoll中del
     int remove_from_epoll(int epollfd, Connection* conn);
@@ -134,7 +224,25 @@ friend class Connection;
 
     //将conn重新放入epoll中
     int reset_conn_in_epoll(Connection* conn);
-public:
+    
+    //将conn重新放入epoll
+    static void notify_modify(Connection* conn);
+
+    //将conn放入wakeup queue
+    static void notify_wakeup(Connection* conn);
+
+    //获取是否退出
+    bool get_exit() {
+        return m_exit;
+    }
+
+    //获取request队列中的元素
+    Connection* pop_element_from_requestqueue();
+
+    //将conn放入response队列中
+    void push_element_to_responsequeue(Connection* conn);
+
+private:
     //连接请求队列, for processThread
     std::list<Connection*>        m_requests_queue;
     //连接请求队列锁
@@ -187,9 +295,15 @@ public:
     //sockpair , 负责通知主线程修改epoll_event中的conn
     Connection*                                     m_notify_modify_conn = nullptr;
     int                                             m_modify_fd = 0;
+
+    char                                            m_ip[32] = {0};
+    short                                           m_port  = 0;
+
+    //业务回调
+    ProcessCallback                                 m_process_cb;
 };
     
-
+//错误码
 enum {
     NET_SUCCESS = 0,
     NET_ARGUMENT_ERROR,

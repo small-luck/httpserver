@@ -10,13 +10,6 @@
 #include <string>
 #include <time.h>
 
-//获取Logger实例
-Logger& Logger::get_instance()
-{
-    static Logger logger;
-    return logger;
-}
-
 //启动日志模块
 bool Logger::start(const char* filepath, int mask)
 {
@@ -58,12 +51,12 @@ void Logger::stop()
 //将日志信息放入队列中
 void Logger::add_to_list(int type, const char* level, const char* filename, int line, const char* funcname, const char* fmt, ...)
 {
-    char content[ONE_LOG_MAXSIZE] = {0};
-    char msg[256] = {0};
+    char content[ONE_LOG_MAXSIZE + 256] = {0};
+    char msg[ONE_LOG_MAXSIZE] = {0};
 
     va_list varg_list;
     va_start(varg_list, fmt);
-    vsnprintf(msg, 256, fmt, varg_list);
+    vsnprintf(msg, ONE_LOG_MAXSIZE, fmt, varg_list);
     va_end(varg_list);
 
     time_t now = time(NULL);
@@ -122,12 +115,3 @@ void Logger::do_log()
     }
 }
 
-void log_init(const char* filename, int mask)
-{
-    Logger::get_instance().start(filename, mask);
-}
-
-void log_uninit()
-{
-    Logger::get_instance().stop();
-}

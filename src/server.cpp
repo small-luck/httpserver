@@ -4,8 +4,8 @@
  *date:2019/10/31
  * */
 
-#include "log.h"
-#include "net.h"
+#include "server.h"
+#include "protocol.h"
 #include <iostream>
 #include <unistd.h>
 #include <signal.h>
@@ -17,22 +17,45 @@
 #define DEFAULTPORT     (10086)
 #define DEFAULTIP       "0.0.0.0"
 
-std::string project_name = "httpserver";
+std::shared_ptr<Server> g_server;
 
-std::shared_ptr<Httpserver> g_httpserver = nullptr;
-//信号处理
-void prog_exit(int signo)
+//server初始化
+bool Server::init(bool bdaemon)
 {
-    std::cout << "program recv signal [" << signo << "] to exit." << std::endl;
+    bool ret;
 
-    //销毁context模块
-    g_httpserver->uninit();
+    m_httpserver = std::make_shared<Httpserver>();
+    m_logger = Logger::get_instance();
+    m_daemon = bdaemon;
+    m_pidpath = "/var/run" + m_server_name + ".pid";
 
-    //停止日志模块
-    log_uninit();
+    if (m_daemon) 
+        daemon_run();
+
+    ret = check_pid_file();
+    if (!ret)
+        return false;
+
+    return true;
 }
+
+//server start
+void Server::start(const char* ip, short port, int log_mask, const ProcessCallback& cb)
+{
+    m_logger->start(m_log_name.c_str(), log_mask);
+    m_httpserver->init(ip, port, cb);
+    m_httpserver->main_loop();
+}
+
+//server stop
+void Server::stop()
+{
+    m_httpserver->uninit();
+    m_logger->stop();
+}
+
 //后台化
-void daemon_run()
+void Server::daemon_run()
 {
     int pid;
     int fd;
@@ -57,12 +80,11 @@ void daemon_run()
 
     if (fd > 2)
         close(fd);
-
 }
 
-bool check_pid_file(std::string& pid_path)
+bool Server::check_pid_file()
 {
-    if (pid_path.empty())
+    if (m_pidpath.empty())
         return false;
 
     pid_t pid = getpid();
@@ -73,7 +95,7 @@ bool check_pid_file(std::string& pid_path)
     memset(&lock, 0, sizeof(lock));
     lock.l_type = F_WRLCK;
     lock.l_whence = SEEK_SET;
-    const char* path = pid_path.c_str();
+    const char* path = m_pidpath.c_str();
 
     fd = open(path, O_CREAT|O_SYNC|O_WRONLY, 0644);
     if (fd < 0) {
@@ -103,6 +125,12 @@ bool check_pid_file(std::string& pid_path)
     return true;
 }
 
+//信号处理
+void prog_exit(int signo)
+{
+    std::cout << "program recv signal [" << signo << "] to exit." << std::endl;
+    g_server->stop();
+}
 
 static void useage()
 {
@@ -123,11 +151,10 @@ int main(int argc, char* argv[])
     signal(SIGTERM, prog_exit);
 
     int ch;
-    int ret;
+    bool ret;
     bool bdaemon = false;
     short port = 0;
     char ip[32] = {0};
-    std::string pid_path;
 
     while ((ch = getopt(argc, argv, "hdp:i:")) != -1) {
         switch (ch) {
@@ -138,7 +165,7 @@ int main(int argc, char* argv[])
                 bdaemon = true;
                 break;
             case 'p':
-                port = atol(optarg);
+                port = atoi(optarg);
                 break;
             case 'i':
                 strcpy(ip, optarg);
@@ -153,30 +180,18 @@ int main(int argc, char* argv[])
         port = DEFAULTPORT;
     if (strlen(ip) == 0)
         strcpy(ip, DEFAULTIP);
-
-    if (bdaemon) {
-        daemon_run();
-    }
-
-    //将进程pid写入文件，保证该进程只有一个运行
-    pid_path = "/var/run/" + project_name + ".pid";
-    if (!check_pid_file(pid_path)) {
-        ret = -EACCES;
-        return ret;
-    }
     
-    //启动日志模块
-    log_init("httpserver.log", LOG_INFO_MASK | LOG_MSG_MASK | LOG_WARN_MASK | LOG_ERROR_MASK);
+    g_server = Server::get_instance();
+    ret = g_server->init(bdaemon);
+    if (!ret) {
+        syslog(LOG_ERR, "init server failed\n");
+        exit(1);
+    }
 
-    //启动context模块
-    g_httpserver = std::make_shared<Httpserver>();
-    g_httpserver->init();
-
-    //main_loop
-    g_httpserver->main_loop(ip, port);
+    g_server->start(ip, port, LOG_INFO_MASK | LOG_MSG_MASK | LOG_WARN_MASK | LOG_ERROR_MASK, Protocol::process_callback);
     
     std::cout << "httpserver exit." << std::endl;
-
+    
     return 0;
 }
 
