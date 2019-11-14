@@ -13,7 +13,7 @@ class Dispatcher {
 public:
     virtual ~Dispatcher() {}
 
-    virtual std::shared_ptr<Operation> get_op() = 0;
+    virtual std::shared_ptr<Operation> get_op(std::string& url) = 0;
     
 protected:
     std::shared_ptr<Operation> m_op = nullptr;
@@ -21,6 +21,7 @@ protected:
 
 class DispatcherPut : public Dispatcher {
 public:
+    std::shared_ptr<Operation> get_op(std::string& url) override;
 
 private:
 
@@ -28,6 +29,7 @@ private:
 
 class DispatcherGet : public Dispatcher {
 public:
+    std::shared_ptr<Operation> get_op(std::string& url) override;
 
 private:
 
@@ -35,6 +37,7 @@ private:
 
 class DispatcherDelete : public Dispatcher {
 public:
+    std::shared_ptr<Operation> get_op(std::string& url) override;
 
 private:
 

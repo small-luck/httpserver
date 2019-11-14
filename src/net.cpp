@@ -25,10 +25,29 @@ void Connection::free_conn(Connection* conn)
     if (conn->m_sockfd > 0) {
         shutdown(conn->m_sockfd, SHUT_RDWR);
         close(conn->m_sockfd);
+        free(conn);
+        conn = nullptr;
+    }
+}
+
+//判断一个connection是否合法，如果不合法，就free
+bool Connection::assert_conn(Connection* conn)
+{
+    if (conn == nullptr)
+        return false;
+
+    int fd = conn->get_fd();
+    int state = conn->get_state();
+
+    if (fd <= 0)
+        return false;
+
+    if (state == CONN_STATE_BAD) {
+        Connection::free_conn(conn);
+        return false;
     }
 
-    free(conn);
-    conn = nullptr;
+    return true;
 }
 
 //检查是否已经接收了一个完整的包
@@ -343,10 +362,8 @@ void Httpserver::recv_request()
         m_dataready_queue.pop_front();
 
         int fd = conn->get_fd();
-        int state = conn->get_state();
-        if (fd < 0 || state == CONN_STATE_BAD) {
-            LOG_ERROR("conn:%p is a bad connection, need free\n", conn);
-            Connection::free_conn(conn);
+        if (!Connection::assert_conn(conn)) {
+            LOG_ERROR("get a invalid conn:%p, just ignore\n", conn);
             continue;
         }
 
@@ -380,7 +397,6 @@ void Httpserver::do_protocol()
 {
     LOG_MSG("process thread:%0x start...\n", std::this_thread::get_id());
     uint64_t content_length;
-    int fd;
     int state;
     int header_end;
     int left_len;
@@ -395,14 +411,12 @@ void Httpserver::do_protocol()
         Connection* conn = m_requests_queue.front();
         m_requests_queue.pop_front();
         
-        fd = conn->get_fd();
         state = conn->get_state();
-        if (fd < 0 || state == CONN_STATE_BAD) {
-            LOG_ERROR("conn:%p is a bad connection, need free\n", conn);
-            Connection::free_conn(conn);
+        if (!Connection::assert_conn(conn)) {
+            LOG_ERROR("get a invalid conn:%p, just ignore\n", conn);
             continue;
         }
-        
+
         std::string recvbuff = conn->get_recv();
         LOG_MSG("conn->recv = %s\n", recvbuff.c_str());
 

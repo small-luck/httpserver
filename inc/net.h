@@ -70,6 +70,10 @@ public:
         return m_content_length;
     }
 
+    std::string& get_url() {
+        return m_url;
+    }
+
 private:
     std::string                 m_http_method;
     std::string                 m_http_version;
@@ -96,6 +100,9 @@ public:
     
     //释放一个connection
     static void free_conn(Connection* conn);
+
+    //判断一个connection是否合法，如果不合法，就free
+    static bool assert_conn(Connection* conn);
 
      //检查是否已经接收了一个完整的包
     bool check_has_complete_header();
@@ -137,6 +144,11 @@ public:
     //获取request ptr
     std::shared_ptr<Request>& get_request() {
         return m_request;
+    }
+
+    //获取response ptr
+    std::shared_ptr<Response>& get_response() {
+        return m_response;
     }
 
     //获取request header的末尾index

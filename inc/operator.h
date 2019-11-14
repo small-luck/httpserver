@@ -6,24 +6,20 @@
 #ifndef __OPERATOR_H__
 #define __OPERATOR_H__
 
-#include "log.h"
-#include "utils.h"
 #include "net.h"
 
-class Operation : public std::enable_shared_from_this<Operation>{
+class Operation {
 public:
     Operation(const char* name) {
         m_opname.append(name);
     }
-
     virtual ~Operation() {}
-
-    std::shared_ptr<Operation> getptr() {
-        return shared_from_this();
-    }
-    
+        
     //初始化，为m_request赋值
-    void init(std::shared_ptr<Request>& request);
+    void init(std::shared_ptr<Request>& req, std::shared_ptr<Response>& res) {
+        m_request = std::shared_ptr<Request>(req);
+        m_reponse = std::shared_ptr<Response>(res);
+    }
 
     //业务执行入口
     virtual int execute() = 0;
@@ -38,21 +34,32 @@ class PutUser : public Operation{
 public:
     PutUser() : Operation("putuser") {
     }
-
     virtual ~PutUser() {}
     
-    //PUT执行的
+    //PUT执行的入口
     virtual int execute() override;
     
     //获取类名
-    std::string& get_name();
+    std::string& get_name() {
+        return m_opname;
+    }
 
 private:
-    std::string m_content;
 };
 
 class GetUser : public Operation {
 public:
+    GetUser() : Operation("getuser") {
+    }
+    virtual ~GetUser() {}
+    
+    //PUT执行的入口
+    virtual int execute() override;
+    
+    //获取类名
+    std::string& get_name() {
+        return m_opname;
+    }
 
 private:
 
@@ -60,6 +67,18 @@ private:
 
 class DeleteUser : public Operation {
 public:
+    DeleteUser() : Operation("deleteuser") {
+    }
+    virtual ~DeleteUser() {}
+    
+    //PUT执行的入口
+    virtual int execute() override;
+    
+    //获取类名
+    std::string& get_name() {
+        return m_opname;
+    }
+
 
 private:
 
